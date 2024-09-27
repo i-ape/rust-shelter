@@ -1,6 +1,8 @@
 [package]
-name = "fasting"
+name = "rust-yt"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+dialoguer = "0.10"   # For interactive prompts
+subprocess =  "0.2.9"
