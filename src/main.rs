@@ -68,8 +68,8 @@ fn main() {
         .unwrap();
 
     // Simulated metadata extraction (replace this with actual extraction if needed)
-    let mut title: String = "Rick Astley - Never Gonna Give You Up".to_string();
-    let mut artist = "Rick Astley".to_string();
+    let mut title: String = title.to_string();
+    let mut artist = artist.to_string();
 
     // Let the user edit metadata
     edit_metadata(&mut title, &mut artist);
@@ -84,10 +84,7 @@ fn main() {
             println!("\nDownload complete! Saved as '{}'", filename);
         }
         Err(e) => {
-            
-            {
-                eprintln!("Error during download: {}", e);
-            }
+            eprintln!("Error during download: {}", e);
         }
     }
 }
