@@ -29,7 +29,7 @@ fn edit_metadata(title: &mut String, artist: &mut String) {
     // Ask the user if they want to edit the title
     *title = Input::new()
         .with_prompt("Enter new title")
-        .with_initial_text(title)
+        .with_initial_text(title.clone())
         .interact_text()
         .unwrap();
 
@@ -41,7 +41,7 @@ fn edit_metadata(title: &mut String, artist: &mut String) {
     {
         *artist = Input::new()
             .with_prompt("Enter new artist")
-            .with_initial_text(artist)
+            .with_initial_text(artist.clone())
             .interact_text()
             .unwrap();
     }
@@ -68,7 +68,7 @@ fn main() {
         .unwrap();
 
     // Simulated metadata extraction (replace this with actual extraction if needed)
-    let mut title = "Rick Astley - Never Gonna Give You Up".to_string();
+    let mut title: String = "Rick Astley - Never Gonna Give You Up".to_string();
     let mut artist = "Rick Astley".to_string();
 
     // Let the user edit metadata
@@ -84,10 +84,10 @@ fn main() {
             println!("\nDownload complete! Saved as '{}'", filename);
         }
         Err(e) => {
-            let var_name = {
+            
+            {
                 eprintln!("Error during download: {}", e);
-            };
-            var_name
+            }
         }
     }
 }
