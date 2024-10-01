@@ -38,12 +38,12 @@ fn apply_metadata(directory: &Path, metadata: &HashMap<String, String>) {
         if path.extension().map_or(false, |ext| ext == "m4a") {
             let mut args = vec!["-i", path.to_str().unwrap(), "-c", "copy"];
 
-            for (_key, value) in metadata {
+            metadata.iter().for_each(|(_key, value)| {
                 if !value.is_empty() {
                     args.push("-metadata");
                     //args.push(&format!("{}={}", key.to_lowercase(), value));
                 }
-            }
+            });
 
             // Create output filename with "_updated" suffix
             let output_path = path.with_file_name(format!(
