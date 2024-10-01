@@ -1,6 +1,5 @@
-//use lofty::prelude::TagExt;
-//use std::fs;
-use lofty::prelude::AudioFile;
+//use std::process::Command;
+use lofty::{read_from_path, write_to_path, Tag, TagExt};
 use tokio::process::Command as AsyncCommand;
 
 #[tokio::main]
@@ -26,7 +25,7 @@ async fn main() {
     }
 
     // Read the metadata
-    let audio_file = <dyn AudioFile>::open(output).expect("Failed to open the audio file");
+    let mut audio_file = read_from_path(output).expect("Failed to open the audio file");
     let mut tags = audio_file.tags().expect("Failed to read tags");
 
     // Display existing tags
@@ -38,13 +37,13 @@ async fn main() {
     let mut new_title = String::new();
     println!("Enter new title (leave empty to keep current):");
     std::io::stdin().read_line(&mut new_title).unwrap();
-
+    
     if !new_title.trim().is_empty() {
         tags.insert("title".to_string(), new_title.trim().to_string());
     }
 
     // Write updated tags back to the audio file
-    audio_file.write_tags(&tags).expect("Failed to write tags");
+    write_to_path(&audio_file, output).expect("Failed to write tags");
 
     println!("Updated tags successfully!");
 }
