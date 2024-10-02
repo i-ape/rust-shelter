@@ -1,78 +1,130 @@
-use std::collections::HashMap;
-use std::io::{self};
-use tokio::process::Command;
+use std::io::{self, Write};
+use tokio::process::Command as AsyncCommand;
 
 #[tokio::main]
 async fn main() {
-    let video_url = "https://www.youtube.com/watch?v=YOUR_VIDEO_ID"; // Replace with your video URL
-    let output = "downloaded_audio.m4a";
+    // Step 1: Prompt the user for the YouTube URL
+    let mut video_url = String::new();
+    println!("Enter the YouTube video or playlist URL:");
+    io::stdin()
+        .read_line(&mut video_url)
+        .expect("Failed to read the video URL");
+    let video_url = video_url.trim();
 
-    // Step 1: Download the audio using yt-dlp
-    let status = Command::new("yt-dlp")
+    // Step 2: Check if the URL is a playlist using yt-dlp
+    let output_check = AsyncCommand::new("yt-dlp")
+        .arg("--print")
+        .arg("%(playlist_title)s")
+        .arg(video_url)
+        .output()
+        .await
+        .expect("Failed to check if URL is a playlist");
+
+    let _is_playlist = !String::from_utf8_lossy(&output_check.stdout)
+        .trim()
+        .is_empty();
+
+    // Step 3: Define the output template
+    let output_template = "out/%(title)s.%(ext)s".to_string();
+
+    // Step 4: Download the video or playlist using yt-dlp
+    let download_status = AsyncCommand::new("yt-dlp")
         .arg("-x") // Extract audio
         .arg("--audio-format")
         .arg("m4a")
         .arg("-o")
-        .arg(output)
+        .arg(output_template)
         .arg(video_url)
         .status()
         .await
         .expect("Failed to execute yt-dlp");
 
-    if !status.success() {
+    if !download_status.success() {
         eprintln!("Failed to download the audio");
         return;
     }
 
-    // Step 2: Extract metadata using yt-dlp
-    let output_metadata = Command::new("yt-dlp")
+    // Step 5: Extract metadata for editing using yt-dlp
+    let metadata_output = AsyncCommand::new("yt-dlp")
         .arg("--print")
-        .arg("%(title)s,%(uploader)s,%(release_date)s,%(track)s,%(track_number)s,%(album)s,%(artist)s")
+        .arg("%(title)s,%(artist)s,%(album)s")
         .arg(video_url)
         .output()
         .await
         .expect("Failed to retrieve metadata");
 
-    if !output_metadata.status.success() {
+    if !metadata_output.status.success() {
         eprintln!("Failed to extract metadata");
         return;
     }
 
-    // Convert the metadata output to a string
-    let metadata_str = String::from_utf8_lossy(&output_metadata.stdout);
-    let metadata_keys = vec![
-        "title", "uploader", "release_date", "track", "track_number", "album", "artist",
-    ];
-    
-    let mut metadata: HashMap<&str, String> = HashMap::new();
-    for (key, value) in metadata_keys.iter().zip(metadata_str.split(',')) {
-        metadata.insert(*key, value.trim().to_string());
+    // Step 6: Parse metadata and prompt for editing
+    let metadata_str = String::from_utf8_lossy(&metadata_output.stdout);
+    let metadata_fields: Vec<&str> = metadata_str.split(',').collect();
+
+    if metadata_fields.len() != 3 {
+        eprintln!("Failed to parse metadata correctly");
+        return;
     }
 
-    // Step 3: Display metadata for editing
-    println!("Current Metadata:");
-    for (key, value) in &metadata {
-        println!("{}: {}", key, value);
+    let mut track_name = metadata_fields[0].trim().to_string();
+    let mut artist_name = metadata_fields[1].trim().to_string();
+    let mut album_name = metadata_fields[2].trim().to_string();
+
+    // Display current metadata
+    println!("\nCurrent Metadata:");
+    println!("Track Name: {}", track_name);
+    println!("Artist: {}", artist_name);
+    println!("Album: {}", album_name);
+
+    // Prompt for new metadata
+    println!("\nEnter new metadata values (leave empty to keep current):");
+
+    let mut new_track_name = String::new();
+    print!("Track Name: ");
+    io::stdout().flush().unwrap();
+    io::stdin().read_line(&mut new_track_name).unwrap();
+
+    if !new_track_name.trim().is_empty() {
+        track_name = new_track_name.trim().to_string();
     }
 
-    // Step 4: Prompt user for metadata updates
-    for key in metadata_keys {
-        let mut new_value = String::new();
-        println!("Enter new {} (leave empty to keep current):", key);
-        io::stdin().read_line(&mut new_value).unwrap();
-        if !new_value.trim().is_empty() {
-            metadata.insert(key, new_value.trim().to_string());
-        }
+    let mut new_artist_name = String::new();
+    print!("Artist: ");
+    io::stdout().flush().unwrap();
+    io::stdin().read_line(&mut new_artist_name).unwrap();
+
+    if !new_artist_name.trim().is_empty() {
+        artist_name = new_artist_name.trim().to_string();
     }
 
-    // Step 5: Print updated metadata
-    println!("\nUpdated Metadata:");
-    for (key, value) in &metadata {
-        println!("{}: {}", key, value);
+    let mut new_album_name = String::new();
+    print!("Album: ");
+    io::stdout().flush().unwrap();
+    io::stdin().read_line(&mut new_album_name).unwrap();
+
+    if !new_album_name.trim().is_empty() {
+        album_name = new_album_name.trim().to_string();
     }
 
-    // Step 6: Apply the metadata using yt-dlp (or other tool)
-    // For simplicity, we'll just print the metadata here, but you can use a tool like `ffmpeg`
-    // to apply metadata to the downloaded file if needed.
-    println!("\nUse a tool like `ffmpeg` or `mutagen` to apply the above metadata to your audio file.");
+    // Step 7: Apply metadata using AtomicParsley
+    let output_file = format!("out/{}.m4a", track_name);
+    let metadata_command = AsyncCommand::new("atomicparsley")
+        .arg(&output_file)
+        .arg("--artist")
+        .arg(&artist_name)
+        .arg("--album")
+        .arg(&album_name)
+        .arg("--title")
+        .arg(&track_name)
+        .arg("--overWrite") // Overwrite the existing file
+        .output()
+        .await
+        .expect("Failed to execute AtomicParsley");
+
+    if !metadata_command.status.success() {
+        eprintln!("Failed to apply metadata to the audio file.");
+    } else {
+        println!("\nMetadata successfully updated for {}", output_file);
+    }
 }
