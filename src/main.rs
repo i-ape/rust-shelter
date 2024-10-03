@@ -1,130 +1,116 @@
-use std::io::{self, Write};
-use tokio::process::Command as AsyncCommand;
+use regex::Regex;
+use std::fs;
+use std::io::{self, BufRead, Write};
+use std::process::{Command, Stdio};
 
-#[tokio::main]
-async fn main() {
-    // Step 1: Prompt the user for the YouTube URL
-    let mut video_url = String::new();
-    println!("Enter the YouTube video or playlist URL:");
-    io::stdin()
-        .read_line(&mut video_url)
-        .expect("Failed to read the video URL");
-    let video_url = video_url.trim();
+fn download_and_convert_to_m4a(youtube_link: &str, is_playlist: bool, audio_quality: u32) {
+    let output_dir = "out";
+    std::fs::create_dir_all(output_dir).expect("Failed to create output directory");
 
-    // Step 2: Check if the URL is a playlist using yt-dlp
-    let output_check = AsyncCommand::new("yt-dlp")
-        .arg("--print")
-        .arg("%(playlist_title)s")
-        .arg(video_url)
-        .output()
-        .await
-        .expect("Failed to check if URL is a playlist");
+    let mut command = Command::new("yt-dlp");
+    command.args([
+        "-x",
+        "--audio-format",
+        "m4a",
+        "--audio-quality",
+        &audio_quality.to_string(),
+        "--add-metadata",
+        "--metadata-from-title",
+        "%(artist)s - %(title)s",
+        "-o",
+    ]);
 
-    let _is_playlist = !String::from_utf8_lossy(&output_check.stdout)
-        .trim()
-        .is_empty();
+    if is_playlist {
+        print!("Enter the playlist name: ");
+        io::stdout().flush().unwrap();
+        let mut playlist_name = String::new();
+        io::stdin()
+            .read_line(&mut playlist_name)
+            .expect("Failed to read input");
 
-    // Step 3: Define the output template
-    let output_template = "out/%(title)s.%(ext)s".to_string();
+        let playlist_name = sanitize_directory_name(playlist_name.trim());
 
-    // Step 4: Download the video or playlist using yt-dlp
-    let download_status = AsyncCommand::new("yt-dlp")
-        .arg("-x") // Extract audio
-        .arg("--audio-format")
-        .arg("m4a")
-        .arg("-o")
-        .arg(output_template)
-        .arg(video_url)
-        .status()
-        .await
-        .expect("Failed to execute yt-dlp");
+        let playlist_dir = format!("{}/{}", output_dir, playlist_name);
+        fs::create_dir_all(&playlist_dir).expect("Failed to create playlist directory");
 
-    if !download_status.success() {
-        eprintln!("Failed to download the audio");
-        return;
-    }
-
-    // Step 5: Extract metadata for editing using yt-dlp
-    let metadata_output = AsyncCommand::new("yt-dlp")
-        .arg("--print")
-        .arg("%(title)s,%(artist)s,%(album)s")
-        .arg(video_url)
-        .output()
-        .await
-        .expect("Failed to retrieve metadata");
-
-    if !metadata_output.status.success() {
-        eprintln!("Failed to extract metadata");
-        return;
-    }
-
-    // Step 6: Parse metadata and prompt for editing
-    let metadata_str = String::from_utf8_lossy(&metadata_output.stdout);
-    let metadata_fields: Vec<&str> = metadata_str.split(',').collect();
-
-    if metadata_fields.len() != 3 {
-        eprintln!("Failed to parse metadata correctly");
-        return;
-    }
-
-    let mut track_name = metadata_fields[0].trim().to_string();
-    let mut artist_name = metadata_fields[1].trim().to_string();
-    let mut album_name = metadata_fields[2].trim().to_string();
-
-    // Display current metadata
-    println!("\nCurrent Metadata:");
-    println!("Track Name: {}", track_name);
-    println!("Artist: {}", artist_name);
-    println!("Album: {}", album_name);
-
-    // Prompt for new metadata
-    println!("\nEnter new metadata values (leave empty to keep current):");
-
-    let mut new_track_name = String::new();
-    print!("Track Name: ");
-    io::stdout().flush().unwrap();
-    io::stdin().read_line(&mut new_track_name).unwrap();
-
-    if !new_track_name.trim().is_empty() {
-        track_name = new_track_name.trim().to_string();
-    }
-
-    let mut new_artist_name = String::new();
-    print!("Artist: ");
-    io::stdout().flush().unwrap();
-    io::stdin().read_line(&mut new_artist_name).unwrap();
-
-    if !new_artist_name.trim().is_empty() {
-        artist_name = new_artist_name.trim().to_string();
-    }
-
-    let mut new_album_name = String::new();
-    print!("Album: ");
-    io::stdout().flush().unwrap();
-    io::stdin().read_line(&mut new_album_name).unwrap();
-
-    if !new_album_name.trim().is_empty() {
-        album_name = new_album_name.trim().to_string();
-    }
-
-    // Step 7: Apply metadata using AtomicParsley
-    let output_file = format!("out/{}.m4a", track_name);
-    let metadata_command = AsyncCommand::new("atomicparsley")
-        .arg(&output_file)
-        .arg("--artist")
-        .arg(&artist_name)
-        .arg("--album")
-        .arg(&album_name)
-        .arg("--title")
-        .arg(&track_name)
-        .arg("--overWrite") // Overwrite the existing file
-        .output()
-        .await
-        .expect("Failed to execute AtomicParsley");
-
-    if !metadata_command.status.success() {
-        eprintln!("Failed to apply metadata to the audio file.");
+        command.args([
+            &format!("{}/%(playlist_index)s - %(title)s.%(ext)s", playlist_dir),
+            "--yes-playlist",
+        ]);
     } else {
-        println!("\nMetadata successfully updated for {}", output_file);
+        command.arg(format!("{}/%(title)s.%(ext)s", output_dir));
     }
+
+    command.arg(youtube_link);
+
+    let mut child = command
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("Failed to start yt-dlp command");
+
+    let stdout = child.stdout.take().expect("Failed to capture stdout");
+    let reader = io::BufReader::new(stdout);
+
+    let _re_progress = Regex::new(r"(\d+\.\d+)%").unwrap(); // Capture percentage if needed
+    let re_completed_files = Regex::new(r"\[\d+/\d+\]").unwrap(); // Capture completed files count
+
+    println!("Downloading...");
+
+    let mut completed_files = 0; // Counter for completed files
+
+    for line in reader.lines() {
+        match line {
+            Ok(line_content) => {
+                if let Some(captures) = re_completed_files.captures(&line_content) {
+                    if let Some(_file_count) = captures.get(0) {
+                        completed_files += 1;
+                        print!("\rFiles Completed: {}{}", completed_files, " ".repeat(10)); // Clear line for neatness
+                        io::stdout().flush().unwrap();
+                    }
+                }
+            }
+            Err(e) => eprintln!("Failed to read line: {}", e),
+        }
+    }
+
+    let status = child.wait().expect("Failed to wait for yt-dlp process");
+    if status.success() {
+        println!("\nDownload and conversion complete!");
+    } else {
+        eprintln!("\nDownload and conversion failed!");
+    }
+}
+
+fn sanitize_directory_name(name: &str) -> String {
+    let invalid_chars = ['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
+    let sanitized_name = name
+        .chars()
+        .filter(|&c| !invalid_chars.contains(&c))
+        .collect::<String>();
+    sanitized_name.trim().to_owned()
+}
+
+fn main() {
+    let mut youtube_link = String::new();
+
+    print!("Enter the YouTube link or playlist link: ");
+    io::stdout().flush().unwrap();
+    io::stdin()
+        .read_line(&mut youtube_link)
+        .expect("Failed to read input");
+
+    let youtube_link = youtube_link.trim();
+
+    let is_playlist = youtube_link.contains("playlist");
+
+    let mut audio_quality_input = String::new();
+    print!("Enter audio quality (0 - best, 9 - worst): ");
+    io::stdout().flush().unwrap();
+    io::stdin()
+        .read_line(&mut audio_quality_input)
+        .expect("Failed to read input");
+
+    let audio_quality: u32 = audio_quality_input.trim().parse().unwrap_or(0);
+
+    download_and_convert_to_m4a(youtube_link, is_playlist, audio_quality);
 }
